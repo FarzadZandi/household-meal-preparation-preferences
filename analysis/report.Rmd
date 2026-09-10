@@ -1,0 +1,181 @@
+---
+title: "Household Meal Preparation and Behavioral Preferences"
+subtitle: "Risk tolerance, future orientation, and procrastination in a German survey"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+    code_folding: hide
+date: "`r format(Sys.Date(), '%Y-%m-%d')`"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+library(dplyr)
+library(readr)
+library(knitr)
+
+sample_flow <- read_csv("outputs/tables/sample_flow.csv", show_col_types = FALSE)
+quality <- read_csv("outputs/tables/data_quality.csv", show_col_types = FALSE)
+coefs <- read_csv("outputs/tables/model_coefficients.csv", show_col_types = FALSE)
+fit <- read_csv("outputs/tables/model_fit.csv", show_col_types = FALSE)
+diagnostics <- read_csv("outputs/tables/diagnostics.csv", show_col_types = FALSE)
+```
+
+## Research question
+
+How are three self-reported behavioral preferences—risk tolerance, willingness to give up present benefits for future gains, and procrastination—associated with the number of main meals a respondent prepared for themselves or other household members over the prior two days?
+
+The data are cross-sectional and observational. Coefficients describe conditional associations, not causal effects. Here, “independent variables” does not mean instrumental variables.
+
+## Main finding
+
+```{r main-finding, results='asis'}
+ols_future <- coefs |>
+  filter(model == "extended_ols", term == "future_orientation") |>
+  slice(1)
+ppml_future <- coefs |>
+  filter(model == "poisson_ppml", term == "future_orientation") |>
+  slice(1)
+ols_risk <- coefs |> filter(model == "extended_ols", term == "risk_taking") |> slice(1)
+ols_procrastination <- coefs |> filter(model == "extended_ols", term == "procrastination") |> slice(1)
+extended_fit <- fit |> filter(model == "extended_ols") |> slice(1)
+
+cat(sprintf(
+  paste0(
+    "Future orientation is the only primary behavioral preference with a stable positive association. ",
+    "In the extended OLS model, a one-point increase on the 0-10 scale is associated with %.3f additional meals ",
+    "(HC3 95%% CI %.3f to %.3f; p = %.3f). The Poisson PML estimate implies %.1f%% more expected meals ",
+    "per point (95%% CI %.1f%% to %.1f%%; p = %.3f). Risk tolerance (p = %.3f) and procrastination ",
+    "(p = %.3f) are not distinguishable from zero in the extended OLS model. The model explains little ",
+    "of the cross-sectional outcome variation (adjusted R-squared %.3f), so the result is modest and descriptive."
+  ),
+  ols_future$estimate,
+  ols_future$conf_low,
+  ols_future$conf_high,
+  ols_future$p_value,
+  100 * (ppml_future$incidence_rate_ratio - 1),
+  100 * (ppml_future$irr_conf_low - 1),
+  100 * (ppml_future$irr_conf_high - 1),
+  ppml_future$p_value,
+  ols_risk$p_value,
+  ols_procrastination$p_value,
+  extended_fit$adjusted_r_squared
+))
+```
+
+## Data and analysis sample
+
+The local input is a de-identified Wave 1 Qualtrics extract. The raw response file is intentionally excluded from version control. Question-text and ImportId rows are removed explicitly, and all recodes are defined in `R/data.R`.
+
+```{r sample-flow}
+sample_flow |>
+  mutate(
+    retained_from_previous = scales::percent(retained_from_previous, accuracy = 0.1)
+  ) |>
+  kable(col.names = c("Stage", "Rows", "Retained from previous"))
+```
+
+```{r outcome-plot, out.width='100%', fig.alt='Bar chart of meals prepared over the prior two days'}
+knitr::include_graphics(
+  normalizePath("outputs/figures/outcome_distribution.png", winslash = "/"),
+  rel_path = FALSE
+)
+```
+
+The outcome is a non-negative bounded count. “More than 10” responses have no usable numeric follow-up in the supplied extract, so the primary pipeline records them as 11, the smallest feasible value. A sensitivity model records them as 10 to reproduce the legacy convention.
+
+## Model strategy
+
+The pipeline estimates:
+
+1. A parsimonious OLS model with HC3 heteroskedasticity-robust inference.
+2. An extended OLS model adding food-access and reported behavior-change controls.
+3. Poisson pseudo-maximum likelihood with robust inference, suitable for a non-negative count without requiring Poisson variance equality for consistency of the conditional mean.
+4. A negative-binomial count model for overdispersion sensitivity.
+5. A centered preference-by-diet interaction model.
+6. Robust MM regression and top-coding sensitivity models.
+7. A legacy specification, plus a version adding gender, to diagnose the old control strategy.
+
+Gender is included in the redesigned models. The old analysis constructed a male indicator but omitted it while including height. In the reproduced legacy specification, height appears associated with meal preparation; after adding gender, its estimate is essentially zero. This confirms that the old height result was acting as a gender proxy in this sample.
+
+## Primary behavioral-preference estimates
+
+```{r preference-plot, out.width='100%', fig.alt='Coefficient and incidence-rate-ratio plot for behavioral preferences'}
+knitr::include_graphics(
+  normalizePath("outputs/figures/preference_estimates.png", winslash = "/"),
+  rel_path = FALSE
+)
+```
+
+```{r primary-table}
+primary <- coefs |>
+  filter(
+    model %in% c("extended_ols", "poisson_ppml", "negative_binomial"),
+    term %in% c("risk_taking", "future_orientation", "procrastination")
+  ) |>
+  transmute(
+    Model = model,
+    Predictor = term,
+    Estimate = if_else(effect_scale == "log count", incidence_rate_ratio, estimate),
+    `95% CI low` = if_else(effect_scale == "log count", irr_conf_low, conf_low),
+    `95% CI high` = if_else(effect_scale == "log count", irr_conf_high, conf_high),
+    `p-value` = p_value,
+    Scale = if_else(effect_scale == "log count", "incidence-rate ratio", "meals")
+  )
+
+kable(primary, digits = 3)
+```
+
+Interpret estimates together with their confidence intervals and stability across model families. The pipeline deliberately avoids stepwise variable selection and an arbitrary binary outcome cutoff, both of which appeared in the legacy notebook.
+
+The Poisson dispersion diagnostic is close to one, so the data do not show material overdispersion. The negative-binomial result is therefore used as corroboration rather than preferred automatically. None of the three diet-interaction terms reaches the conventional 5% threshold; the future-orientation interaction is exploratory at approximately the 10% level.
+
+## Diagnostics and sensitivity
+
+```{r diagnostics-table}
+diagnostics |>
+  mutate(value = signif(value, 4)) |>
+  kable(col.names = c("Diagnostic", "Value", "Interpretation"))
+```
+
+```{r ols-diagnostics, out.width='100%', fig.alt='OLS standardized residuals against fitted values'}
+knitr::include_graphics(
+  normalizePath("outputs/figures/ols_diagnostics.png", winslash = "/"),
+  rel_path = FALSE
+)
+```
+
+```{r fit-table}
+fit |>
+  mutate(across(where(is.numeric), ~ signif(.x, 4))) |>
+  kable()
+```
+
+AIC and BIC should only be compared among models fitted to the same outcome, sample, and likelihood family. OLS and count-model information criteria are shown for auditability, not as a universal ranking.
+
+## Data-quality notes
+
+```{r quality-table}
+quality |>
+  filter(variable %in% c(
+    "meal_preparation_count", "risk_taking", "future_orientation",
+    "procrastination", "income_midpoint", "healthy_diet"
+  )) |>
+  mutate(
+    missing_rate = scales::percent(missing_rate, accuracy = 0.1),
+    across(c(mean, sd, min, median, max), ~ round(.x, 2))
+  ) |>
+  kable()
+```
+
+The source has no respondent identifier after de-identification. Exact duplicate analytic rows therefore cannot be distinguished from legitimately identical answer patterns and are retained. Roughly half of the full Wave 1 extract does not receive the household meal-preparation item because of survey branching; this is a scope condition, not automatically a missing-data defect.
+
+## Limitations
+
+- The design is cross-sectional and cannot establish temporal order or causal effects.
+- Preferences and meal preparation are self-reported and may contain recall or social-desirability error.
+- The outcome is top-coded and observed only for the relevant household branch.
+- Complete-case inference assumes that remaining item nonresponse is ignorable after conditioning on included variables.
+- The models do not use survey weights because none are present in the de-identified analysis extract.

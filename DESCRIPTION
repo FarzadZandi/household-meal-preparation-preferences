@@ -1,0 +1,25 @@
+Package: mealpreferenceanalysis
+Type: Project
+Title: Household Meal Preparation and Behavioral Preferences
+Version: 0.1.0
+Authors@R: person("Farzad", "Zandi", role = c("aut", "cre"), email = "noreply@example.com")
+Description: Reproducible R pipeline for estimating associations between meal
+    preparation counts and risk tolerance, future orientation, and procrastination.
+License: Proprietary
+Encoding: UTF-8
+Imports:
+    broom,
+    car,
+    dplyr,
+    ggplot2,
+    knitr,
+    lmtest,
+    MASS,
+    readr,
+    rmarkdown,
+    sandwich,
+    scales,
+    stringr,
+    targets,
+    testthat,
+    tibble

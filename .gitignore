@@ -1,0 +1,23 @@
+# R and IDE state
+.Rhistory
+.RData
+.Ruserdata
+.Rproj.user/
+
+# Reproducible pipeline cache and generated artifacts
+_targets/
+outputs/**
+!outputs/.gitkeep
+
+# Private data and legacy/source materials
+data/raw/**
+archive/
+
+# Rendering and OS clutter
+analysis/*_files/
+analysis/*_cache/
+*.utf8.md
+*.knit.md
+.DS_Store
+Thumbs.db
+
